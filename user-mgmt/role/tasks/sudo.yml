@@ -1,0 +1,73 @@
+---
+- name: Check current sudo access
+  ansible.builtin.shell: |
+    sudo -l -U {{ target_username }} 2>/dev/null || echo "No sudo access"
+  register: sudo_status
+  changed_when: false
+
+- name: Show sudo menu
+  ansible.builtin.pause:
+    prompt: |
+      =================================
+      Sudo Management for '{{ target_username }}'
+      =================================
+      Current status:
+      {{ sudo_status.stdout_lines[0] if sudo_status.stdout_lines else 'Unknown' }}
+
+      1. Grant full sudo access
+      2. Grant passwordless sudo
+      3. Grant limited sudo access
+      4. Revoke sudo access
+      5. View sudo configuration
+
+      Choose action (1-5):
+  register: sudo_menu
+
+- name: Set sudo_action
+  set_fact:
+    sudo_action: "{{ sudo_menu.user_input | default('1') }}"
+
+- name: Ask limited commands
+  ansible.builtin.pause:
+    prompt: "Enter allowed commands (comma-separated):"
+  register: limited_cmd_input
+  when: sudo_action == '3'
+
+- name: Set limited_commands
+  set_fact:
+    limited_commands: "{{ limited_cmd_input.user_input }}"
+  when: sudo_action == '3'
+
+# -------------------------
+
+- name: Create sudoers directory
+  ansible.builtin.file:
+    path: /etc/sudoers.d
+    state: directory
+    mode: '0750'
+
+- name: Configure sudo access
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/{{ target_username }}"
+    content: |
+      # Sudo configuration for {{ target_username }}
+      # Managed by Ansible on {{ ansible_date_time.date }}
+
+      {% if sudo_action == '1' %}
+      {{ target_username }} ALL=(ALL:ALL) ALL
+      {% elif sudo_action == '2' %}
+      {{ target_username }} ALL=(ALL:ALL) NOPASSWD: ALL
+      {% elif sudo_action == '3' %}
+      {{ target_username }} ALL=(ALL:ALL) {{ limited_commands.split(',') | join(', ') }}
+      {% endif %}
+    owner: root
+    group: root
+    mode: '0440'
+    validate: 'visudo -cf %s'
+  when: sudo_action in ['1', '2', '3']
+
+- name: Remove sudo access
+  ansible.builtin.file:
+    path: "/etc/sudoers.d/{{ target_username }}"
+    state: absent
+  when: sudo_action == '4'

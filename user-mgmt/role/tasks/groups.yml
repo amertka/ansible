@@ -1,0 +1,151 @@
+---
+# -------------------------------------------------
+# Get current user groups
+# -------------------------------------------------
+
+- name: Get current user groups
+  command: "id -Gn {{ target_username }}"
+  register: current_groups
+  changed_when: false
+
+- name: Set current group list fact
+  set_fact:
+    current_groups_list: "{{ current_groups.stdout.split() }}"
+
+# -------------------------------------------------
+# Ask group action
+# -------------------------------------------------
+
+- name: Ask group action
+  pause:
+    prompt: |
+      ===================================
+      Group Management for '{{ target_username }}'
+      Current groups: {{ current_groups_list | join(', ') }}
+
+      1. Add to groups
+      2. Remove from groups
+      3. List all system groups
+      4. Set primary group
+      5. Create new group
+
+      Choose action (1-5):
+  register: group_action_input
+
+- name: Set action fact
+  set_fact:
+    group_action: "{{ group_action_input.user_input | trim }}"
+
+# -------------------------------------------------
+# Ask target groups when needed
+# -------------------------------------------------
+
+- name: Ask target groups
+  pause:
+    prompt: |
+      Enter group names (comma-separated)
+      Current groups: {{ current_groups_list | join(', ') }}
+  register: target_groups_input
+  when: group_action in ['1','2','4','5']
+
+- name: Normalize target groups
+  set_fact:
+    target_groups_list: "{{ target_groups_input.user_input.split(',') | map('trim') | reject('equalto','') | list }}"
+  when: group_action in ['1','2','4','5']
+
+# -------------------------------------------------
+# Ask GID for new group
+# -------------------------------------------------
+
+- name: Ask new group gid
+  pause:
+    prompt: "Enter GID (empty for auto):"
+  register: gid_input
+  when: group_action == '5'
+
+# -------------------------------------------------
+# LIST ALL GROUPS
+# -------------------------------------------------
+
+- name: List all system groups
+  command: "getent group | cut -d: -f1 | sort"
+  register: all_groups
+  changed_when: false
+  when: group_action == '3'
+
+- name: Show all groups
+  debug:
+    var: all_groups.stdout_lines
+  when: group_action == '3'
+
+# -------------------------------------------------
+# ADD USER TO GROUPS
+# -------------------------------------------------
+
+- name: Add user to groups
+  user:
+    name: "{{ target_username }}"
+    groups: "{{ target_groups_list }}"
+    append: true
+  when: group_action == '1'
+
+# -------------------------------------------------
+# REMOVE USER FROM GROUPS (SAFE METHOD)
+# -------------------------------------------------
+
+- name: Prevent removing groups user is not in
+  debug:
+    msg: "User is not a member of {{ item }} — skipping"
+  when:
+    - group_action == '2'
+    - item not in current_groups_list
+  loop: "{{ target_groups_list | default([]) }}"
+
+- name: Remove user from groups using gpasswd
+  command: "gpasswd -d {{ target_username }} {{ item }}"
+  loop: "{{ target_groups_list }}"
+  register: remove_results
+  changed_when: "'Removing user' in remove_results.stdout"
+  failed_when: false
+  when:
+    - group_action == '2'
+    - item in current_groups_list
+
+# -------------------------------------------------
+# SET PRIMARY GROUP
+# -------------------------------------------------
+
+- name: Set primary group
+  user:
+    name: "{{ target_username }}"
+    group: "{{ target_groups_list[0] }}"
+  when: group_action == '4'
+
+# -------------------------------------------------
+# CREATE NEW GROUP
+# -------------------------------------------------
+
+- name: Create new group
+  group:
+    name: "{{ target_groups_list[0] }}"
+    gid: "{{ gid_input.user_input if (gid_input.user_input | trim) != '' else omit }}"
+    state: present
+  when: group_action == '5'
+
+# -------------------------------------------------
+# AUDIT
+# -------------------------------------------------
+
+- name: Audit group operation
+  include_tasks: tasks/shared/audit.yml
+  vars:
+    action: "group_manage"
+    details: >-
+      {{
+        {
+          'group_action': group_action,
+          'groups': target_groups_list | default([]),
+          'current_groups': current_groups_list
+        } | to_nice_json
+      }}
+  when: group_action in ['1','2','4','5']

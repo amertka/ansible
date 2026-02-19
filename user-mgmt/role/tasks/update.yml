@@ -1,0 +1,227 @@
+---
+# -------------------------------------------------
+# Check if user exists
+# -------------------------------------------------
+
+- name: Check if user exists
+  command: "getent passwd {{ target_username }}"
+  register: user_info
+  changed_when: false
+  failed_when: false
+
+- name: Stop if user not found
+  fail:
+    msg: "User '{{ target_username }}' not found on {{ inventory_hostname }}"
+  when: user_info.rc != 0
+
+
+# -------------------------------------------------
+# Extract current values
+# -------------------------------------------------
+
+- name: Extract user details
+  set_fact:
+    current_shell: "{{ user_info.stdout.split(':')[6] }}"
+    current_comment: "{{ user_info.stdout.split(':')[4] }}"
+    current_gid: "{{ user_info.stdout.split(':')[3] }}"
+    current_home: "{{ user_info.stdout.split(':')[5] }}"
+
+- name: Get user groups
+  command: "id -Gn {{ target_username }}"
+  register: user_groups_info
+  changed_when: false
+
+
+# -------------------------------------------------
+# Ask update action
+# -------------------------------------------------
+
+- name: Ask update action
+  pause:
+    prompt: |
+      Update options for '{{ target_username }}':
+      1. Change password
+      2. Change shell (current: {{ current_shell }})
+      3. Change comment (current: {{ current_comment }})
+      4. Manage groups (current: {{ user_groups_info.stdout }})
+      5. Lock/Unlock account
+      6. Set account expiry date
+      7. Set password expiry policy
+
+      Choose option (1-7):
+  register: update_action_input
+
+- set_fact:
+    update_action: "{{ update_action_input.user_input | default('1') }}"
+
+
+# -------------------------------------------------
+# PASSWORD UPDATE
+# -------------------------------------------------
+
+- name: Handle password update
+  include_tasks: tasks/shared/password.yml
+  when: update_action == '1'
+
+- name: Apply new password
+  user:
+    name: "{{ target_username }}"
+    password: "{{ encrypted_password }}"
+    update_password: always
+  when: update_action == '1'
+
+
+# -------------------------------------------------
+# SHELL UPDATE
+# -------------------------------------------------
+
+- name: Ask new shell
+  pause:
+    prompt: "Enter new shell path:"
+  register: new_shell_input
+  when: update_action == '2'
+
+- name: Update shell
+  user:
+    name: "{{ target_username }}"
+    shell: "{{ new_shell_input.user_input }}"
+  when: update_action == '2'
+
+
+# -------------------------------------------------
+# COMMENT UPDATE
+# -------------------------------------------------
+
+- name: Ask new comment
+  pause:
+    prompt: "Enter new comment:"
+  register: new_comment_input
+  when: update_action == '3'
+
+- name: Update comment
+  user:
+    name: "{{ target_username }}"
+    comment: "{{ new_comment_input.user_input }}"
+  when: update_action == '3'
+
+# -------------------------------------------------
+# GROUP MANAGEMENT
+# -------------------------------------------------
+
+- name: Manage user groups
+  include_tasks: tasks/groups.yml
+  when: update_action == '4'
+
+# -------------------------------------------------
+# ACCOUNT LOCK / UNLOCK (STRONG LOCK)
+# -------------------------------------------------
+
+- name: Ask lock state
+  pause:
+    prompt: "Type LOCK or UNLOCK:"
+  register: lock_input
+  when: update_action == '5'
+
+
+# ---- LOCK ----
+
+- name: Lock password
+  user:
+    name: "{{ target_username }}"
+    password_lock: true
+  when:
+    - update_action == '5'
+    - lock_input.user_input | upper == 'LOCK'
+
+- name: Expire account immediately
+  command: "usermod --expiredate 1 {{ target_username }}"
+  when:
+    - update_action == '5'
+    - lock_input.user_input | upper == 'LOCK'
+
+
+# ---- UNLOCK ----
+
+- name: Unlock password
+  user:
+    name: "{{ target_username }}"
+    password_lock: false
+  when:
+    - update_action == '5'
+    - lock_input.user_input | upper == 'UNLOCK'
+
+- name: Remove account expiry
+  command: "usermod --expiredate '' {{ target_username }}"
+  when:
+    - update_action == '5'
+    - lock_input.user_input | upper == 'UNLOCK'
+
+# -------------------------------------------------
+# EXPIRY UPDATE
+# -------------------------------------------------
+
+- name: Ask expiry days
+  pause:
+    prompt: "Enter account expiry days (0=infinite, empty=abort):"
+  register: expire_days_input
+  when: update_action == '6'
+
+- name: Abort if empty
+  fail:
+    msg: "Expiry update cancelled"
+  when:
+    - update_action == '6'
+    - expire_days_input.user_input | trim == ""
+
+- name: Compute expiry epoch
+  set_fact:
+    expiry_epoch: "{{ (ansible_date_time.epoch | int) + (expire_days_input.user_input | int * 86400) }}"
+  when:
+    - update_action == '6'
+    - expire_days_input.user_input | int > 0
+
+- name: Apply expiry
+  user:
+    name: "{{ target_username }}"
+    expires: "{{ expiry_epoch | default(-1) }}"
+  when: update_action == '6'
+
+# -------------------------------------------------
+# PASSWORD EXPIRY POLICY
+# -------------------------------------------------
+
+- name: Ask max password age (days)
+  pause:
+    prompt: "Enter max password age in days (e.g. 90, empty=abort):"
+  register: pass_max_input
+  when: update_action == '7'
+
+- name: Abort if empty
+  fail:
+    msg: "Password expiry update cancelled"
+  when:
+    - update_action == '7'
+    - pass_max_input.user_input | trim == ""
+
+- name: Ask warning days
+  pause:
+    prompt: "Enter warning days before expiry (default 7):"
+  register: pass_warn_input
+  when: update_action == '7'
+
+- name: Apply password expiry policy
+  user:
+    name: "{{ target_username }}"
+    password_expire_max: "{{ pass_max_input.user_input | int }}"
+    password_expire_warn: "{{ pass_warn_input.user_input | default(7) | int }}"
+  when: update_action == '7'
+
+# -------------------------------------------------
+# AUDIT LOG
+# -------------------------------------------------
+
+- name: Audit update
+  include_tasks: tasks/shared/audit.yml
+  vars:
+    action: "update"
+    details: "{{ {'action': update_action} | to_nice_json }}"

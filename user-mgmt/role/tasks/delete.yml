@@ -1,0 +1,90 @@
+---
+# -------------------------------------------------
+# Check if user exists
+# -------------------------------------------------
+- name: Check if user exists
+  command: "getent passwd {{ target_username }}"
+  register: user_details
+  changed_when: false
+  failed_when: false
+
+- name: Abort if user does not exist
+  fail:
+    msg: "User '{{ target_username }}' does not exist on {{ inventory_hostname }}"
+  when: user_details.rc != 0
+
+# -------------------------------------------------
+# Gather additional info
+# -------------------------------------------------
+- name: Check running processes
+  shell: "ps -u {{ target_username }} -o pid --no-headers | wc -l"
+  register: process_count
+  changed_when: false
+
+- name: Check home directory size
+  shell: "du -sh /home/{{ target_username }} 2>/dev/null | cut -f1 || echo '0'"
+  register: home_size
+  changed_when: false
+
+# -------------------------------------------------
+# Confirm deletion
+# -------------------------------------------------
+- name: Confirm deletion
+  pause:
+    prompt: |
+      ⚠️  DANGER: USER DELETION CONFIRMATION
+      ===================================
+      User: {{ target_username }}
+      UID: {{ user_details.stdout.split(':')[2] }}
+      Home: {{ user_details.stdout.split(':')[5] }}
+      Processes: {{ process_count.stdout }}
+      Home Size: {{ home_size.stdout }}
+
+      Type 'DELETE' to confirm:
+  register: confirm_delete_input
+
+# -------------------------------------------------
+# Execute deletion
+# -------------------------------------------------
+- name: Execute deletion
+  when: confirm_delete_input.user_input == 'DELETE'
+  block:
+
+    - name: Stop user processes if any
+      shell: "pkill -u {{ target_username }}"
+      ignore_errors: true
+      when: process_count.stdout | int > 0
+
+    - name: Archive home directory (optional)
+      archive:
+        path: "{{ user_details.stdout.split(':')[5] }}"
+        dest: "/var/backups/{{ target_username }}-{{ ansible_date_time.date }}.tar.gz"
+        format: gz
+        remove: false
+      when: user_config.archive_home | default(false)
+
+    - name: Delete user
+      user:
+        name: "{{ target_username }}"
+        state: absent
+        remove: "{{ user_config.remove_home | default(false) }}"
+        force: yes
+
+    - name: Log deletion
+      include_tasks: tasks/shared/audit.yml
+      vars:
+        action: "delete"
+        details: "{{ {
+          'processes': process_count.stdout,
+          'home_size': home_size.stdout,
+          'archived': user_config.archive_home | default(false),
+          'home_removed': user_config.remove_home | default(false)
+        } | to_nice_json }}"
+
+# -------------------------------------------------
+# Abort if not confirmed
+# -------------------------------------------------
+- name: Abort deletion if not confirmed
+  fail:
+    msg: "Deletion aborted by operator."
+  when: confirm_delete_input.user_input != 'DELETE'

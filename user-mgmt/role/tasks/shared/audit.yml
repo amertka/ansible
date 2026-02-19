@@ -1,0 +1,31 @@
+---
+# -------------------------------------------------------------------
+# Audit tasks: ensure directory exists and log user actions
+# -------------------------------------------------------------------
+
+# Ensure the audit directory exists
+- name: Ensure audit directory exists
+  file:
+    path: "{{ audit.log_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+  when: audit.enabled | default(false)
+
+# Determine the full path for the audit log file
+- name: Set audit log file path
+  set_fact:
+    audit_log_file: "{{ audit.log_dir }}/actions.log"
+  when: audit.enabled | default(false)
+
+# Log the action to the audit file
+- name: Log action
+  lineinfile:
+    path: "{{ audit_log_file }}"
+    line: "{{ ansible_date_time.iso8601 }} | {{ ansible_user_id }} | {{ target_username }} | {{ action }} | {{ inventory_hostname }} | {{ details }}"
+    create: yes
+    owner: root
+    group: root
+    mode: '0600'
+  when: audit.enabled | default(false)

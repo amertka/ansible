@@ -1,0 +1,41 @@
+---
+- name: Interactive User Management System
+  hosts: all
+  become: yes
+  gather_facts: yes
+
+  vars_prompt:
+
+    - name: selected_operation
+      prompt: |
+        ===================================
+        User Management Operations
+        ===================================
+        1. Create User
+        2. Delete User
+        3. Update User
+        4. Manage Groups
+        5. Manage SSH Keys
+        6. Manage Sudo Access
+        7. Exit
+
+        Please choose an operation (1-7):
+      private: no
+      default: "7"
+
+    - name: target_username
+      prompt: "Enter username"
+      private: no
+
+  vars:
+    operation_map:
+      '1': 'create'
+      '2': 'delete'
+      '3': 'update'
+      '4': 'groups'
+      '5': 'ssh'
+      '6': 'sudo'
+      '7': 'exit'
+
+  roles:
+    - role: role

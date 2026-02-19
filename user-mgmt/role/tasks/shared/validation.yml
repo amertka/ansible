@@ -1,0 +1,28 @@
+---
+- name: Validate username format
+  fail:
+    msg: "Username must be 3-32 characters, start with letter, and contain only a-z, 0-9, _, -"
+  when: 
+    - selected_operation != '7'
+    - target_username is not match('^[a-z][a-z0-9_-]{2,31}$')
+  
+- name: Check user existence for relevant operations
+  command: "getent passwd {{ target_username }}"
+  register: user_check
+  changed_when: false
+  ignore_errors: yes
+  when: selected_operation in ['2', '3', '4', '5', '6']
+  
+- name: Validate user exists
+  fail:
+    msg: "User '{{ target_username }}' does not exist"
+  when: 
+    - selected_operation in ['2', '3', '4', '5', '6']
+    - user_check.rc != 0
+  
+- name: Validate user doesn't exist for creation
+  fail:
+    msg: "User '{{ target_username }}' already exists"
+  when:
+    - selected_operation == '1'
+    - user_check.rc == 0

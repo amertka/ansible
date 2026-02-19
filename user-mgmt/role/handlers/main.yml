@@ -1,0 +1,17 @@
+---
+- name: Restart sshd
+  service:
+    name: sshd
+    state: restarted
+  when: ansible_service_mgr != "systemd"
+
+- name: Restart ssh
+  systemd:
+    name: ssh
+    state: restarted
+    daemon_reload: yes
+  when: ansible_service_mgr == "systemd"
+
+- name: Flush sudo cache
+  command: sudo -k
+  changed_when: false

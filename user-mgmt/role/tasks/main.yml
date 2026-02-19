@@ -1,0 +1,15 @@
+- name: Exit if user chose to exit
+  debug:
+    msg: "Thank you for using User Management System. Goodbye!"
+  when: selected_operation == '7'
+
+- meta: end_play
+  when: selected_operation == '7'
+
+- name: Validate username not empty
+  fail:
+    msg: "Username cannot be empty"
+  when: target_username == ""
+
+- name: Include operation handler
+  include_tasks: "tasks/{{ operation_map[selected_operation] }}.yml"

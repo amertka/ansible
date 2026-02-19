@@ -1,0 +1,54 @@
+---
+# Total Groups
+allowed_groups:
+  - name: developers
+    gid: 2001
+  - name: devops
+    gid: 2002
+
+primary_group: developers
+secondary_groups: []
+
+# Operation timeout (seconds)
+operation_timeout: 300
+
+# Shell mappings
+shell_options:
+  /bin/bash: "Bash"
+  /bin/sh: "Bourne Shell"
+  /bin/zsh: "Z Shell"
+  /usr/sbin/nologin: "No Login"
+  /bin/false: "No Shell"
+
+# Default settings user
+user_conf_default:
+  shell: /bin/bash
+  create_home: true
+  home_permissions: '0750'
+  system_user: false
+  password_min_length: 14
+  password_complexity: true
+  comment: "{{ target_username }}"
+  home_dir: "/home/{{ target_username }}"
+  
+# Security settings
+security:
+  min_uid: 1000
+  max_uid: 60000
+  password:
+    min_days: 1
+    max_days: 90
+    warn_days: 7
+    inactive_days: 30
+    hash_algo: sha512
+  lockout:
+    attempts: 3
+    time: 300
+  sudoers_dir: /etc/sudoers.d
+  sudoers_mode: '0440'
+  
+# Logging
+audit:
+  enabled: true
+  log_dir: /var/log/user_audit
+  retention_days: 90
