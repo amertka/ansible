@@ -37,15 +37,10 @@ security:
   max_uid: 60000
   password:
     min_days: 1
-    max_days: 90
+    max_days: 30
     warn_days: 7
     inactive_days: 30
     hash_algo: sha512
-  lockout:
-    attempts: 3
-    time: 300
-  sudoers_dir: /etc/sudoers.d
-  sudoers_mode: '0440'
   
 # Logging
 audit:

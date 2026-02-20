@@ -111,26 +111,6 @@
 
 
 # -------------------------
-# Password expiration (REQUIRED)
-# -------------------------
-- name: Ask password max days
-  pause:
-    prompt: "Enter password max days (0 = infinite, REQUIRED)"
-  register: passmax_input
-
-- name: Validate password max days
-  assert:
-    that:
-      - passmax_input.user_input | trim | length > 0
-      - passmax_input.user_input is match('^[0-9]+$')
-    fail_msg: "Password max days must be numeric (0 allowed)"
-
-- name: Set password max days
-  set_fact:
-    password_max_days: "{{ passmax_input.user_input | int }}"
-
-
-# -------------------------
 # PASSWORD COLLECTION
 # -------------------------
 
@@ -176,11 +156,11 @@
 # -------------------------
 # PASSWORD AGING POLICY
 # -------------------------
-
-- name: Set password expiration policy
+- name: Set password aging policy (including inactive)
   command: >
-    chage -M {{ (password_max_days == 0) | ternary(-1, password_max_days) }}
+    chage -M {{ security.password.max_days }}
            -m {{ security.password.min_days }}
            -W {{ security.password.warn_days }}
+           -I {{ security.password.inactive_days }}
            {{ target_username }}
   changed_when: true
